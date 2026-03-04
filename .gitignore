@@ -1,0 +1,7 @@
+# Raw extracts
+raw_extract/
+*.zip
+
+# OS files
+.DS_Store
+Thumbs.db
