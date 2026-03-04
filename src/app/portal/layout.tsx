@@ -57,7 +57,7 @@ export default async function PortalLayout({
         </nav>
 
         <div className="mt-auto pt-8">
-          <UserButton afterSignOutUrl="/" />
+          <UserButton />
         </div>
       </aside>
 
