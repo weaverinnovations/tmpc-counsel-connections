@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useTransition } from "react";
+import { toggleAttorneyUnavailable, toggleAttorneyWithdrawn } from "@/app/admin/actions";
 
 type Attorney = {
   id: string;
@@ -14,6 +15,7 @@ type Attorney = {
   phone: string | null;
   status: string;
   isUnavailable: boolean | null;
+  unavailableNote: string | null;
 };
 
 function OrgTypeBadge({ orgType }: { orgType: string | null }) {
@@ -34,21 +36,114 @@ function OrgTypeBadge({ orgType }: { orgType: string | null }) {
   );
 }
 
-export default function AttorneySearch({ attorneys }: { attorneys: Attorney[] }) {
+function AttorneyRow({
+  attorney,
+  eventId,
+}: {
+  attorney: Attorney;
+  eventId: string;
+}) {
+  const [isPending, startTransition] = useTransition();
+  const areas = Array.isArray(attorney.practiceAreas)
+    ? (attorney.practiceAreas as { area?: string }[])
+        .map((p) => p.area)
+        .filter(Boolean)
+        .join(", ")
+    : "";
+
+  const handleToggleUnavailable = () => {
+    startTransition(() => toggleAttorneyUnavailable(attorney.id, eventId));
+  };
+  const handleToggleWithdrawn = () => {
+    startTransition(() => toggleAttorneyWithdrawn(attorney.id, eventId));
+  };
+
+  return (
+    <tr
+      className={`border-b last:border-b-0 hover:bg-slate-50 ${
+        attorney.isUnavailable || attorney.status === "withdrawn" ? "opacity-60" : ""
+      }`}
+    >
+      <td className="px-4 py-2.5 font-medium text-slate-800">
+        {attorney.lastName}, {attorney.firstName}
+      </td>
+      <td className="px-4 py-2.5 text-slate-600">{attorney.firm}</td>
+      <td className="px-4 py-2.5 text-slate-500">{attorney.city ?? "—"}</td>
+      <td className="px-4 py-2.5">
+        <OrgTypeBadge orgType={attorney.organizationType} />
+      </td>
+      <td className="max-w-xs px-4 py-2.5 text-slate-500 truncate">
+        {areas || "—"}
+      </td>
+      <td className="px-4 py-2.5">
+        {attorney.isUnavailable ? (
+          <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">
+            Unavailable
+          </span>
+        ) : attorney.status === "withdrawn" ? (
+          <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+            Withdrawn
+          </span>
+        ) : (
+          <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">
+            Active
+          </span>
+        )}
+      </td>
+      <td className="px-3 py-2.5">
+        <div className="flex items-center gap-1">
+          <button
+            disabled={isPending}
+            onClick={handleToggleUnavailable}
+            className={`rounded px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+              attorney.isUnavailable
+                ? "bg-red-100 text-red-700 hover:bg-red-200"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            }`}
+            title={attorney.isUnavailable ? "Mark as available" : "Mark as unavailable"}
+          >
+            {attorney.isUnavailable ? "Unavail ✓" : "Unavail"}
+          </button>
+          <button
+            disabled={isPending}
+            onClick={handleToggleWithdrawn}
+            className={`rounded px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+              attorney.status === "withdrawn"
+                ? "bg-orange-100 text-orange-700 hover:bg-orange-200"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            }`}
+            title={attorney.status === "withdrawn" ? "Reactivate" : "Mark as withdrawn"}
+          >
+            {attorney.status === "withdrawn" ? "Withdrawn ✓" : "Withdraw"}
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+export default function AttorneySearch({
+  attorneys: initialAttorneys,
+  eventId,
+}: {
+  attorneys: Attorney[];
+  eventId: string;
+}) {
   const [query, setQuery] = useState("");
   const [orgFilter, setOrgFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
 
   const orgTypes = useMemo(() => {
     const types = new Set<string>();
-    attorneys.forEach((a) => {
+    initialAttorneys.forEach((a) => {
       if (a.organizationType) types.add(a.organizationType);
     });
     return Array.from(types).sort();
-  }, [attorneys]);
+  }, [initialAttorneys]);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase();
-    return attorneys.filter((a) => {
+    return initialAttorneys.filter((a) => {
       const matchesQuery =
         !q ||
         `${a.firstName} ${a.lastName}`.toLowerCase().includes(q) ||
@@ -57,9 +152,16 @@ export default function AttorneySearch({ attorneys }: { attorneys: Attorney[] })
         (a.email ?? "").toLowerCase().includes(q);
       const matchesOrg =
         orgFilter === "all" || a.organizationType === orgFilter;
-      return matchesQuery && matchesOrg;
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "active" &&
+          !a.isUnavailable &&
+          a.status !== "withdrawn") ||
+        (statusFilter === "unavailable" && a.isUnavailable) ||
+        (statusFilter === "withdrawn" && a.status === "withdrawn");
+      return matchesQuery && matchesOrg && matchesStatus;
     });
-  }, [attorneys, query, orgFilter]);
+  }, [initialAttorneys, query, orgFilter, statusFilter]);
 
   return (
     <div className="rounded-lg border bg-white shadow-sm">
@@ -84,8 +186,18 @@ export default function AttorneySearch({ attorneys }: { attorneys: Attorney[] })
             </option>
           ))}
         </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+        >
+          <option value="all">All statuses</option>
+          <option value="active">Active only</option>
+          <option value="unavailable">Unavailable</option>
+          <option value="withdrawn">Withdrawn</option>
+        </select>
         <span className="text-sm text-slate-500">
-          {filtered.length} of {attorneys.length}
+          {filtered.length} of {initialAttorneys.length}
         </span>
       </div>
 
@@ -100,50 +212,13 @@ export default function AttorneySearch({ attorneys }: { attorneys: Attorney[] })
               <th className="px-4 py-3 text-left font-medium text-slate-600">Org Type</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">Practice Areas</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">Status</th>
+              <th className="px-3 py-3 text-left font-medium text-slate-600">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y">
-            {filtered.map((a) => {
-              const areas = Array.isArray(a.practiceAreas)
-                ? (a.practiceAreas as { area?: string }[])
-                    .map((p) => p.area)
-                    .filter(Boolean)
-                    .join(", ")
-                : "";
-              return (
-                <tr
-                  key={a.id}
-                  className={`hover:bg-slate-50 ${a.isUnavailable ? "opacity-50" : ""}`}
-                >
-                  <td className="px-4 py-2.5 font-medium text-slate-800">
-                    {a.lastName}, {a.firstName}
-                  </td>
-                  <td className="px-4 py-2.5 text-slate-600">{a.firm}</td>
-                  <td className="px-4 py-2.5 text-slate-500">{a.city ?? "—"}</td>
-                  <td className="px-4 py-2.5">
-                    <OrgTypeBadge orgType={a.organizationType} />
-                  </td>
-                  <td className="max-w-xs px-4 py-2.5 text-slate-500 truncate">
-                    {areas || "—"}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {a.isUnavailable ? (
-                      <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">
-                        Unavailable
-                      </span>
-                    ) : a.status === "withdrawn" ? (
-                      <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                        Withdrawn
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">
-                        Active
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
+            {filtered.map((a) => (
+              <AttorneyRow key={a.id} attorney={a} eventId={eventId} />
+            ))}
           </tbody>
         </table>
         {filtered.length === 0 && (

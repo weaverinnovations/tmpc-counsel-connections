@@ -9,6 +9,7 @@ import {
 } from "@/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { notFound } from "next/navigation";
+import AssignmentsGrid from "./assignments-grid";
 
 type SlotRow = {
   id: string;
@@ -20,21 +21,6 @@ type SlotRow = {
   dayDate: string;
   dayFormat: string;
 };
-
-type AssignmentCell = {
-  companyId: string;
-  timeSlotId: string;
-  attorneyName: string;
-  firm: string;
-};
-
-function fmt(t: string) {
-  // Convert "14:00:00" → "2:00 PM"
-  const [h, m] = t.split(":").map(Number);
-  const period = h >= 12 ? "PM" : "AM";
-  const hour = h > 12 ? h - 12 : h === 0 ? 12 : h;
-  return `${hour}:${String(m).padStart(2, "0")} ${period}`;
-}
 
 export default async function AssignmentsPage({
   params,
@@ -67,8 +53,10 @@ export default async function AssignmentsPage({
       .orderBy(asc(timeSlots.sortOrder)),
     db
       .select({
+        id: assignments.id,
         companyId: assignments.companyId,
         timeSlotId: assignments.timeSlotId,
+        attorneyId: assignments.attorneyId,
         firstName: attorneys.firstName,
         lastName: attorneys.lastName,
         firm: attorneys.firm,
@@ -81,14 +69,31 @@ export default async function AssignmentsPage({
 
   if (!event) notFound();
 
-  // Build assignment lookup: slotId -> companyId -> {name, firm}
-  const cellMap = new Map<string, Map<string, { name: string; firm: string }>>();
+  // Build cell map: slotId → companyId → cell
+  const cellMap = new Map<
+    string,
+    Map<
+      string,
+      {
+        assignmentId: string;
+        companyId: string;
+        timeSlotId: string;
+        attorneyName: string;
+        firm: string;
+        attorneyId: string;
+      }
+    >
+  >();
   for (const a of rawAssignments) {
     if (!cellMap.has(a.timeSlotId)) {
       cellMap.set(a.timeSlotId, new Map());
     }
     cellMap.get(a.timeSlotId)!.set(a.companyId, {
-      name: `${a.firstName} ${a.lastName}`,
+      assignmentId: a.id,
+      companyId: a.companyId,
+      timeSlotId: a.timeSlotId,
+      attorneyId: a.attorneyId,
+      attorneyName: `${a.firstName} ${a.lastName}`,
       firm: a.firm,
     });
   }
@@ -111,117 +116,25 @@ export default async function AssignmentsPage({
 
   const days = Array.from(dayMap.entries()).map(([id, d]) => ({ id, ...d }));
 
-  // Count filled cells
-  const totalAssigned = rawAssignments.length;
-  const totalPossible = rawSlots.length * companyList.length;
-
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Master Schedule</h1>
         <p className="mt-1 text-slate-500">
-          {event.name} · {totalAssigned} interviews assigned ·{" "}
+          {event.name} · {rawAssignments.length} interviews assigned ·{" "}
           {companyList.length} companies · {rawSlots.length} time slots
+        </p>
+        <p className="mt-1 text-xs text-slate-400">
+          Click any cell to assign an attorney or manage existing assignments.
         </p>
       </div>
 
-      {/* Legend */}
-      <div className="mb-4 flex flex-wrap items-center gap-4 text-xs text-slate-500">
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block h-3 w-3 rounded bg-emerald-100 ring-1 ring-emerald-300" />
-          Assigned
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block h-3 w-3 rounded bg-slate-100 ring-1 ring-slate-200" />
-          Open
-        </span>
-      </div>
-
-      {days.map((day) => (
-        <div key={day.id} className="mb-8">
-          <div className="mb-2 flex items-center gap-2">
-            <h2 className="text-base font-semibold text-slate-800">
-              {day.label}
-            </h2>
-            <span
-              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                day.format === "virtual"
-                  ? "bg-blue-100 text-blue-700"
-                  : "bg-emerald-100 text-emerald-700"
-              }`}
-            >
-              {day.format === "virtual" ? "Virtual" : "In-Person"}
-            </span>
-            <span className="text-xs text-slate-400">
-              {day.slots.length} slots ·{" "}
-              {day.slots.reduce(
-                (sum, s) => sum + (cellMap.get(s.id)?.size ?? 0),
-                0
-              )}{" "}
-              interviews
-            </span>
-          </div>
-
-          {/* Horizontally scrollable table */}
-          <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
-            <table className="border-collapse text-xs">
-              <thead>
-                <tr className="border-b bg-slate-50">
-                  <th className="sticky left-0 z-10 min-w-[90px] border-r bg-slate-50 px-3 py-2 text-left font-semibold text-slate-600">
-                    Time
-                  </th>
-                  {companyList.map((c) => (
-                    <th
-                      key={c.id}
-                      className="min-w-[130px] border-r px-2 py-2 text-left font-semibold text-slate-600 last:border-r-0"
-                    >
-                      <span className="line-clamp-2">{c.name}</span>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {day.slots.map((slot) => {
-                  const slotAssignments = cellMap.get(slot.id);
-                  return (
-                    <tr key={slot.id} className="border-b last:border-b-0 hover:bg-slate-50">
-                      <td className="sticky left-0 z-10 border-r bg-white px-3 py-2 font-medium text-slate-600 group-hover:bg-slate-50">
-                        {fmt(slot.startTime)}
-                      </td>
-                      {companyList.map((c) => {
-                        const cell = slotAssignments?.get(c.id);
-                        return (
-                          <td
-                            key={c.id}
-                            className={`border-r px-2 py-1.5 last:border-r-0 ${
-                              cell
-                                ? "bg-emerald-50"
-                                : "bg-white"
-                            }`}
-                          >
-                            {cell ? (
-                              <div>
-                                <p className="font-medium text-slate-800 leading-tight">
-                                  {cell.name}
-                                </p>
-                                <p className="text-slate-500 truncate max-w-[120px] leading-tight mt-0.5">
-                                  {cell.firm}
-                                </p>
-                              </div>
-                            ) : (
-                              <span className="text-slate-300">—</span>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ))}
+      <AssignmentsGrid
+        companies={companyList}
+        days={days}
+        initialCellMap={cellMap}
+        eventId={eventId}
+      />
     </div>
   );
 }

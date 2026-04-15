@@ -4,7 +4,9 @@ import { logoutAction } from "@/app/login/actions";
 
 const navItems = [
   { href: "/portal", label: "Home" },
-  { href: "/portal/schedule", label: "My Schedule" },
+  { href: "/portal/register", label: "Registration" },
+  { href: "/portal/interviewers", label: "Interviewers" },
+  { href: "/portal/schedule", label: "Select Schedule" },
   { href: "/portal/schedule/review", label: "Schedule Review" },
 ];
 
