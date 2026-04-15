@@ -1,10 +1,15 @@
-export default function EventsPage() {
+import { redirect } from "next/navigation";
+import { db } from "@/lib/db";
+import { events } from "@/lib/db/schema";
+
+export default async function EventsPage() {
+  const event = await db.query.events.findFirst();
+  if (event) {
+    redirect(`/admin/events/${event.id}/attorneys`);
+  }
   return (
-    <div>
-      <h1 className="mb-6 text-2xl font-bold">Events</h1>
-      <p className="text-slate-600">
-        Event management coming in Phase 2.
-      </p>
+    <div className="text-slate-500">
+      No events found. Run the seed script to populate data.
     </div>
   );
 }

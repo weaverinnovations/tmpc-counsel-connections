@@ -1,76 +1,40 @@
-import { auth } from "@clerk/nextjs/server";
+import { cookies } from "next/headers";
 import { db } from "@/lib/db";
-import { adminUsers, companies } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { companies } from "@/lib/db/schema";
+import { like } from "drizzle-orm";
 
-export type UserRole = "admin" | "company" | "none";
+export type UserRole = "admin" | "company" | null;
 
-export interface ResolvedUser {
-  clerkUserId: string;
-  role: UserRole;
-  companyId?: string;
-  companyName?: string;
+export async function getRole(): Promise<UserRole> {
+  const cookieStore = await cookies();
+  const role = cookieStore.get("tmpc_role")?.value;
+  if (role === "admin" || role === "company") return role;
+  return null;
+}
+
+export async function getCompanyId(): Promise<string | null> {
+  const cookieStore = await cookies();
+  return cookieStore.get("tmpc_company_id")?.value ?? null;
 }
 
 /**
- * Get the current Clerk user ID from the auth session.
- * Returns null if not authenticated.
+ * Called during login — finds JPMorgan Chase (demo company) in DB.
+ * Returns its ID to store in the cookie.
  */
-export async function getCurrentUserId(): Promise<string | null> {
-  const { userId } = await auth();
-  return userId;
-}
-
-/**
- * Check if a Clerk user ID corresponds to an admin user.
- */
-export async function isAdmin(clerkUserId: string): Promise<boolean> {
+export async function findDemoCompany() {
   const result = await db
-    .select()
-    .from(adminUsers)
-    .where(eq(adminUsers.clerkUserId, clerkUserId))
-    .limit(1);
-  return result.length > 0;
-}
-
-/**
- * Get the company associated with a Clerk user ID.
- * Returns null if the user is not linked to any company.
- */
-export async function getCompanyForUser(clerkUserId: string) {
-  const result = await db
-    .select()
+    .select({ id: companies.id, name: companies.name })
     .from(companies)
-    .where(eq(companies.clerkUserId, clerkUserId))
+    .where(like(companies.name, "%JPMorgan%"))
     .limit(1);
-  return result.length > 0 ? result[0] : null;
-}
 
-/**
- * Resolve the full role and context for the current authenticated user.
- * Checks admin_users first, then companies.
- */
-export async function resolveCurrentUser(): Promise<ResolvedUser | null> {
-  const clerkUserId = await getCurrentUserId();
-  if (!clerkUserId) return null;
+  if (result.length > 0) return result[0];
 
-  // Check if admin
-  const adminCheck = await isAdmin(clerkUserId);
-  if (adminCheck) {
-    return { clerkUserId, role: "admin" };
-  }
+  // Fallback: first company alphabetically
+  const fallback = await db
+    .select({ id: companies.id, name: companies.name })
+    .from(companies)
+    .limit(1);
 
-  // Check if company user
-  const company = await getCompanyForUser(clerkUserId);
-  if (company) {
-    return {
-      clerkUserId,
-      role: "company",
-      companyId: company.id,
-      companyName: company.name,
-    };
-  }
-
-  // Authenticated but no role assigned
-  return { clerkUserId, role: "none" };
+  return fallback[0] ?? null;
 }
