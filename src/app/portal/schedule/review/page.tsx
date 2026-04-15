@@ -10,6 +10,7 @@ import {
 } from "@/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
 import Link from "next/link";
+import PrintButton from "./print-button";
 
 function fmt(t: string) {
   const [h, m] = t.split(":").map(Number);
@@ -94,12 +95,7 @@ export default async function ScheduleReviewPage() {
         >
           ← Back to Schedule
         </Link>
-        <button
-          onClick={() => window.print()}
-          className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-        >
-          Print Schedule
-        </button>
+        <PrintButton />
       </div>
 
       {/* Document */}
