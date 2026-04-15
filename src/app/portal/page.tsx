@@ -1,3 +1,7 @@
+import { cookies } from "next/headers";
+import { db } from "@/lib/db";
+import { companies, events, assignments } from "@/lib/db/schema";
+import { eq, count } from "drizzle-orm";
 import {
   Card,
   CardContent,
@@ -8,63 +12,142 @@ import {
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
-export default function PortalHome() {
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    selections_complete: {
+      label: "Selections Complete",
+      cls: "bg-green-100 text-green-700 border-green-200",
+    },
+    registered: {
+      label: "Registered",
+      cls: "bg-blue-100 text-blue-700 border-blue-200",
+    },
+    invited: {
+      label: "Invited",
+      cls: "bg-yellow-100 text-yellow-700 border-yellow-200",
+    },
+  };
+  const s = map[status] ?? {
+    label: status,
+    cls: "bg-slate-100 text-slate-600 border-slate-200",
+  };
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${s.cls}`}
+    >
+      {s.label}
+    </span>
+  );
+}
+
+export default async function PortalHome() {
+  const cookieStore = await cookies();
+  const companyId = cookieStore.get("tmpc_company_id")?.value;
+
+  if (!companyId) {
+    return (
+      <div className="text-slate-500">Session expired. Please sign in again.</div>
+    );
+  }
+
+  const [company, [{ interviewCount }], event] = await Promise.all([
+    db.query.companies.findFirst({ where: eq(companies.id, companyId) }),
+    db
+      .select({ interviewCount: count() })
+      .from(assignments)
+      .where(eq(assignments.companyId, companyId)),
+    db.query.events.findFirst(),
+  ]);
+
+  if (!company || !event) {
+    return <div className="text-slate-500">Company not found.</div>;
+  }
+
+  const startDate = new Date(event.startDate + "T00:00:00").toLocaleDateString(
+    "en-US",
+    { weekday: "long", month: "long", day: "numeric", year: "numeric" }
+  );
+  const endDate = new Date(event.endDate + "T00:00:00").toLocaleDateString(
+    "en-US",
+    { weekday: "long", month: "long", day: "numeric" }
+  );
+
   return (
     <div>
-      <h1 className="mb-2 text-2xl font-bold">Welcome to Counsel Connections</h1>
-      <p className="mb-8 text-slate-600">
-        Follow the steps below to complete your interview schedule.
-      </p>
+      <div className="mb-8">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-slate-900">{company.name}</h1>
+          <StatusBadge status={company.status} />
+        </div>
+        <p className="mt-1 text-slate-500">Counsel Connections Participant</p>
+      </div>
 
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        <Card>
+      {/* Event info */}
+      <Card className="mb-6 bg-white">
+        <CardHeader>
+          <CardTitle className="text-base">{event.name}</CardTitle>
+          <CardDescription>
+            {startDate} – {endDate}
+            {event.location ? ` · ${event.location}` : ""}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-6">
+            <div>
+              <p className="text-3xl font-bold text-slate-800">{interviewCount}</p>
+              <p className="text-sm text-slate-500">scheduled interviews</p>
+            </div>
+            {company.legalStaffCount != null && (
+              <div>
+                <p className="text-3xl font-bold text-slate-800">
+                  {company.legalStaffCount}
+                </p>
+                <p className="text-sm text-slate-500">legal staff</p>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Contact card */}
+      {company.contactName && (
+        <Card className="mb-6 bg-white">
           <CardHeader>
-            <CardTitle>1. Register</CardTitle>
-            <CardDescription>
-              Complete your company registration with practice areas and contact
-              information.
-            </CardDescription>
+            <CardTitle className="text-base">Primary Contact</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Link href="/portal/register">
-              <Button variant="outline" className="w-full">
-                Go to Registration
-              </Button>
-            </Link>
+          <CardContent className="grid gap-1 text-sm">
+            <p className="font-medium text-slate-800">{company.contactName}</p>
+            {company.contactTitle && (
+              <p className="text-slate-600">{company.contactTitle}</p>
+            )}
+            {company.contactEmail && (
+              <p className="text-slate-500">{company.contactEmail}</p>
+            )}
+            {company.contactPhone && (
+              <p className="text-slate-500">{company.contactPhone}</p>
+            )}
           </CardContent>
         </Card>
+      )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>2. Add Interviewers</CardTitle>
-            <CardDescription>
-              Add your in-house attorneys who will conduct the interviews.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Link href="/portal/interviewers">
-              <Button variant="outline" className="w-full">
-                Manage Interviewers
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>3. Schedule Interviews</CardTitle>
-            <CardDescription>
-              Select time slots and choose attorneys for each interview.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Link href="/portal/schedule">
-              <Button variant="outline" className="w-full">
-                Go to Schedule
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
+      {/* Quick links */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Link href="/portal/schedule">
+          <div className="rounded-lg border bg-white p-5 shadow-sm transition-shadow hover:shadow-md cursor-pointer">
+            <p className="font-semibold text-slate-800">My Schedule</p>
+            <p className="mt-1 text-sm text-slate-500">
+              View your {interviewCount} assigned interviews, grouped by day
+            </p>
+          </div>
+        </Link>
+        <Link href="/portal/schedule/review">
+          <div className="rounded-lg border bg-white p-5 shadow-sm transition-shadow hover:shadow-md cursor-pointer">
+            <p className="font-semibold text-slate-800">Schedule Review</p>
+            <p className="mt-1 text-sm text-slate-500">
+              Print-ready view of your complete interview schedule
+            </p>
+          </div>
+        </Link>
       </div>
     </div>
   );

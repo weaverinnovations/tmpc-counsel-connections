@@ -1,20 +1,24 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextRequest, NextResponse } from "next/server";
 
-const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
-const isPortalRoute = createRouteMatcher(["/portal(.*)"]);
+export default function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  const role = request.cookies.get("tmpc_role")?.value;
 
-export default clerkMiddleware(async (auth, request) => {
-  // Require authentication for admin and portal routes
-  if (isAdminRoute(request) || isPortalRoute(request)) {
-    await auth.protect();
+  if (pathname.startsWith("/admin")) {
+    if (role !== "admin") {
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
   }
-});
+
+  if (pathname.startsWith("/portal")) {
+    if (role !== "company") {
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
+  }
+
+  return NextResponse.next();
+}
 
 export const config = {
-  matcher: [
-    // Skip Next.js internals and all static files, unless found in search params
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    // Always run for API routes
-    "/(api|trpc)(.*)",
-  ],
+  matcher: ["/admin/:path*", "/portal/:path*"],
 };
